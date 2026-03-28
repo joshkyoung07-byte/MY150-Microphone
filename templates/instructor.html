@@ -1,40 +1,176 @@
 <!DOCTYPE html>
-
-<html> 
-
+<html>
 <head>
-
     <title>MY 150 Questions</title>
-
 </head>
+<body style="background-color: #1E3765; color: white; font-family: sans-serif;">
+    <div style="max-width: 720px; margin: 40px auto; text-align: center;">
+        <h1>Queue</h1>
+        <div id="queue-container"></div>
 
-<body style="background-color: #1E3765;">
+        <h2 style="margin-top: 30px;">Audio Status</h2>
+        <p id="audio-status">No microphone selected.</p>
+        <audio id="remote-audio" autoplay playsinline></audio>
 
-    <h1 style="text-align: center;color: white"> Queue:</h1>
-  
-    <center>
-    {%for table in q_list%}
-    <table>
-        <tr>
-            
-            <td><h2 style="text-align: center;color: white">{{ table }}</h2></td>
-            <form action="/" method="POST">
-                {% if table in active_list: %}
-                    <td><button type="submit" name="action" value={{ table }}>Turn Off</button></td>
-                {% else %}
-                    <td><button type="submit" name="action" value={{ table }}>Turn On</button></td>
-                {% endif %}
-            </form>
-        </tr>
-    </table>
-    {%endfor%}
-    <form action="/" method="POST">
-        <button type="submit" name="action" value="update_list">Update</button>
-    </form>
-    <h3 style="text-align: center;color: red"> {{ q_list }}</h3>
-    <h3 style="text-align: center;color: red"> {{ active_list }}</h3>
-    </center>
-    
+        <form action="/logout" method="POST" style="margin-top: 20px;">
+            <button type="submit" style="padding: 10px 18px;">Log Out</button>
+        </form>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const initialState = {{ initial_state|tojson }};
+        const socket = io();
+
+        const queueContainer = document.getElementById("queue-container");
+        const audioStatus = document.getElementById("audio-status");
+        const remoteAudio = document.getElementById("remote-audio");
+
+        let currentState = initialState;
+        let peerConnection = null;
+        let connectedTable = null;
+
+        function renderState(state) {
+            currentState = state;
+            queueContainer.innerHTML = "";
+
+            if (!state.q_list.length) {
+                queueContainer.innerHTML = "<p>No one in queue.</p>";
+            }
+
+            state.q_list.forEach((table) => {
+                const row = document.createElement("div");
+                row.style.margin = "12px 0";
+
+                const label = document.createElement("span");
+                label.textContent = "Table " + table;
+                label.style.display = "inline-block";
+                label.style.minWidth = "140px";
+
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = state.active_table === table ? "Turn Off" : "Turn On";
+                button.style.padding = "8px 14px";
+                button.addEventListener("click", () => {
+                    remoteAudio.play().catch(() => {});
+                    socket.emit("select_student", { table });
+                });
+
+                row.appendChild(label);
+                row.appendChild(button);
+                queueContainer.appendChild(row);
+            });
+
+            if (!state.active_table) {
+                audioStatus.textContent = "No microphone selected.";
+            } else if (connectedTable === state.active_table && peerConnection) {
+                audioStatus.textContent = "Listening to table " + state.active_table + ".";
+            } else {
+                audioStatus.textContent = "Waiting for table " + state.active_table + " microphone...";
+            }
+
+            if (peerConnection && state.active_table !== connectedTable) {
+                closeInstructorAudio();
+            }
+        }
+
+        function closeInstructorAudio() {
+            if (peerConnection) {
+                peerConnection.ontrack = null;
+                peerConnection.onicecandidate = null;
+                peerConnection.onconnectionstatechange = null;
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            connectedTable = null;
+            remoteAudio.srcObject = null;
+        }
+
+        async function handleOffer(table, sdp) {
+            closeInstructorAudio();
+            connectedTable = table;
+
+            peerConnection = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+            });
+            const connection = peerConnection;
+
+            connection.ontrack = (event) => {
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.play().catch(() => {});
+                audioStatus.textContent = "Listening to table " + table + ".";
+            };
+
+            connection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit("instructor_ice_candidate", {
+                        table,
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            connection.onconnectionstatechange = () => {
+                if (["failed", "disconnected", "closed"].includes(connection.connectionState) && peerConnection === connection) {
+                    closeInstructorAudio();
+                    if (currentState.active_table === table) {
+                        audioStatus.textContent = "Audio connection lost for table " + table + ".";
+                    }
+                }
+            };
+
+            await connection.setRemoteDescription(sdp);
+            const answer = await connection.createAnswer();
+            await connection.setLocalDescription(answer);
+            socket.emit("webrtc_answer", {
+                table,
+                sdp: connection.localDescription
+            });
+            audioStatus.textContent = "Connecting to table " + table + "...";
+        }
+
+        socket.on("state_update", renderState);
+
+        socket.on("webrtc_offer", async (data) => {
+            if (data.table !== currentState.active_table) {
+                return;
+            }
+
+            try {
+                await handleOffer(data.table, data.sdp);
+            } catch (error) {
+                closeInstructorAudio();
+                audioStatus.textContent = "Unable to connect to table " + data.table + ".";
+            }
+        });
+
+        socket.on("student_ice_candidate", async (data) => {
+            if (!peerConnection || data.table !== connectedTable || !data.candidate) {
+                return;
+            }
+
+            try {
+                await peerConnection.addIceCandidate(data.candidate);
+            } catch (error) {
+                audioStatus.textContent = "Network setup failed.";
+            }
+        });
+
+        socket.on("stop_instructor_audio", () => {
+            closeInstructorAudio();
+            if (!currentState.active_table) {
+                audioStatus.textContent = "No microphone selected.";
+            }
+        });
+
+        socket.on("audio_error", (data) => {
+            if (data.table === currentState.active_table) {
+                audioStatus.textContent = "Table " + data.table + " microphone error: " + data.message;
+            }
+        });
+
+        renderState(initialState);
+    </script>
 </body>
-
 </html>

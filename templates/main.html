@@ -1,58 +1,183 @@
 <!DOCTYPE html>
-
-<html> 
-
+<html>
 <head>
-
     <title>MY 150 Questions</title>
-
 </head>
+<body style="background-color: #1E3765; color: white; font-family: sans-serif;">
+    <div style="max-width: 640px; margin: 40px auto; text-align: center;">
+        <h1>Class Code</h1>
+        <h3>{{ class_code }}</h3>
 
-<body style="background-color: #1E3765;">
+        <h1>Table Number</h1>
+        <h3 id="table-number">{{ table }}</h3>
 
-    <h1 style="text-align: center;color: white"> Class Code:</h1>
-    <h3 style="text-align: center;color: white"> {{ session['code'] }}</h3>
-    <br>
-    <h1 style="text-align: center;color: white"> Table Number:</h1>
-    <h3 style="text-align: center;color: white"> {{ session['table'] }}</h3>
-    <br>
-    <h1 style="text-align: center;color: white"> People in Queue:</h1>
-    <h3 style="text-align: center;color: white"> {{ queue }}</h3>
-    <br>
-    <center>
-        <form action="/" method="POST">
-        <center>
-            {% if session['hand'] == 'lowered': %}
-                <button type="submit" name="action" value="raise">Raise Hand</button>
-            {% else %}
-                <button type="submit" name="action" value="lower">Lower Hand</button>
-            {% endif %}
-            <h3 style="text-align: center;color: red"> {{ q_list }}</h3>
-            <h3 style="text-align: center;color: red"> {{ active_list }}</h3>
-        </center>
+        <h1>People in Queue</h1>
+        <h3 id="queue-count">{{ initial_state.queue_count }}</h3>
+
+        <button id="hand-button" type="button" style="padding: 10px 18px; margin-top: 10px;"></button>
+
+        <h2 style="margin-top: 30px;">Microphone Status</h2>
+        <h3 id="mic-status">Inactive</h3>
+
+        <h2 style="margin-top: 30px;">Queue</h2>
+        <p id="queue-list">No one in queue</p>
+
+        <p id="student-message" style="min-height: 24px; color: #ffd9a8;"></p>
+
+        <form action="/logout" method="POST" style="margin-top: 20px;">
+            <button type="submit" style="padding: 10px 18px;">Log Out</button>
         </form>
-    <table>
-        <tr>
-            {% if session['table'] in active_list: %}
-                <td><img src="{{ url_for('static', filename='images/Active.png') }}" align="middle" width="150"> </td>
-            {% else %}
-                <td><img src="{{ url_for('static', filename='images/Mic.jpg') }}" align="middle" width="150"> </td>
-            {% endif %}
-            <td><h2 style="text-align: center;color: white"> Microphone Status:</h2></td>
-            {% if session['table'] in active_list: %}
-                <td><h2 style="text-align: center;color: white"> Active</h2></td>
-            {% else %}
-                <td><h2 style="text-align: center;color: white"> Inactive</h2></td>
-            {% endif %}
-        </tr>
-    </table>
-    <form action="/" method="POST">
-        <button type="submit" name="action" value="update_main">Update</button>
-    </form>
-    </center>
-    
+    </div>
 
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const table = {{ table|tojson }};
+        const initialState = {{ initial_state|tojson }};
+        const socket = io();
 
+        const handButton = document.getElementById("hand-button");
+        const queueCount = document.getElementById("queue-count");
+        const queueList = document.getElementById("queue-list");
+        const micStatus = document.getElementById("mic-status");
+        const studentMessage = document.getElementById("student-message");
+
+        let currentState = initialState;
+        let handRaised = initialState.q_list.includes(table);
+        let peerConnection = null;
+        let localStream = null;
+        let startingAudio = false;
+
+        function renderState(state) {
+            currentState = state;
+            handRaised = state.q_list.includes(table);
+            queueCount.textContent = state.queue_count;
+            queueList.textContent = state.q_list.length ? state.q_list.join(", ") : "No one in queue";
+            micStatus.textContent = state.active_table === table ? "Active" : "Inactive";
+            handButton.textContent = handRaised ? "Lower Hand" : "Raise Hand";
+
+            if (state.active_table !== table) {
+                studentMessage.textContent = "";
+                closeAudio();
+            }
+        }
+
+        function closeAudio() {
+            if (peerConnection) {
+                peerConnection.onicecandidate = null;
+                peerConnection.onconnectionstatechange = null;
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            if (localStream) {
+                localStream.getTracks().forEach((track) => track.stop());
+                localStream = null;
+            }
+        }
+
+        async function startAudio() {
+            if (peerConnection || startingAudio) {
+                return;
+            }
+
+            startingAudio = true;
+            studentMessage.textContent = "Connecting microphone...";
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    },
+                    video: false
+                });
+
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+                });
+                const connection = peerConnection;
+
+                localStream.getTracks().forEach((track) => {
+                    connection.addTrack(track, localStream);
+                });
+
+                connection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit("student_ice_candidate", { candidate: event.candidate });
+                    }
+                };
+
+                connection.onconnectionstatechange = () => {
+                    if (["failed", "disconnected", "closed"].includes(connection.connectionState) && peerConnection === connection) {
+                        closeAudio();
+                    }
+                };
+
+                const offer = await connection.createOffer();
+                await connection.setLocalDescription(offer);
+                socket.emit("webrtc_offer", { sdp: connection.localDescription });
+                studentMessage.textContent = "Microphone live.";
+            } catch (error) {
+                closeAudio();
+                studentMessage.textContent = "Microphone access failed.";
+                socket.emit("student_audio_error", { message: error.message });
+            } finally {
+                startingAudio = false;
+            }
+        }
+
+        handButton.addEventListener("click", async () => {
+            const action = handRaised ? "lower" : "raise";
+            const response = await fetch("/student/hand", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action })
+            });
+
+            if (!response.ok) {
+                studentMessage.textContent = "Unable to update queue.";
+                return;
+            }
+
+            renderState(await response.json());
+        });
+
+        socket.on("state_update", renderState);
+
+        socket.on("start_audio", async (data) => {
+            if (data.table === table) {
+                await startAudio();
+            }
+        });
+
+        socket.on("stop_audio", () => {
+            studentMessage.textContent = "";
+            closeAudio();
+        });
+
+        socket.on("webrtc_answer", async (data) => {
+            if (!peerConnection || data.table !== table) {
+                return;
+            }
+
+            await peerConnection.setRemoteDescription(data.sdp);
+        });
+
+        socket.on("instructor_ice_candidate", async (data) => {
+            if (!peerConnection || data.table !== table || !data.candidate) {
+                return;
+            }
+
+            try {
+                await peerConnection.addIceCandidate(data.candidate);
+            } catch (error) {
+                studentMessage.textContent = "Network setup failed.";
+            }
+        });
+
+        window.addEventListener("beforeunload", closeAudio);
+        renderState(initialState);
+    </script>
 </body>
-
 </html>
