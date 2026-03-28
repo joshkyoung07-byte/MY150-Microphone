@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+
+<html> 
+
+<head>
+
+    <title>MY 150 Questions</title>
+
+</head>
+
+<body style="background-color: #1E3765;">
+
+    <h1 style="text-align: center;color: white"> Queue:</h1>
+  
+    <center>
+    {%for table in q_list%}
+    <table>
+        <tr>
+            
+            <td><h2 style="text-align: center;color: white">{{ table }}</h2></td>
+            <form action="/" method="POST">
+                {% if table in active_list: %}
+                    <td><button type="submit" name="action" value={{ table }}>Turn Off</button></td>
+                {% else %}
+                    <td><button type="submit" name="action" value={{ table }}>Turn On</button></td>
+                {% endif %}
+            </form>
+        </tr>
+    </table>
+    {%endfor%}
+    <form action="/" method="POST">
+        <button type="submit" name="action" value="update_list">Update</button>
+    </form>
+    <h3 style="text-align: center;color: red"> {{ q_list }}</h3>
+    <h3 style="text-align: center;color: red"> {{ active_list }}</h3>
+    </center>
+    
+</body>
+
+</html>

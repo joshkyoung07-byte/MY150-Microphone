@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+
+<html> 
+
+<head>
+
+    <title>MY 150 Questions</title>
+
+</head>
+
+<body style="background-color: #1E3765;">
+
+    <h1 style="text-align: center;color: white"> Class Code:</h1>
+    <h3 style="text-align: center;color: white"> {{ session['code'] }}</h3>
+    <br>
+    <h1 style="text-align: center;color: white"> Table Number:</h1>
+    <h3 style="text-align: center;color: white"> {{ session['table'] }}</h3>
+    <br>
+    <h1 style="text-align: center;color: white"> People in Queue:</h1>
+    <h3 style="text-align: center;color: white"> {{ queue }}</h3>
+    <br>
+    <center>
+        <form action="/" method="POST">
+        <center>
+            {% if session['hand'] == 'lowered': %}
+                <button type="submit" name="action" value="raise">Raise Hand</button>
+            {% else %}
+                <button type="submit" name="action" value="lower">Lower Hand</button>
+            {% endif %}
+            <h3 style="text-align: center;color: red"> {{ q_list }}</h3>
+            <h3 style="text-align: center;color: red"> {{ active_list }}</h3>
+        </center>
+        </form>
+    <table>
+        <tr>
+            {% if session['table'] in active_list: %}
+                <td><img src="{{ url_for('static', filename='images/Active.png') }}" align="middle" width="150"> </td>
+            {% else %}
+                <td><img src="{{ url_for('static', filename='images/Mic.jpg') }}" align="middle" width="150"> </td>
+            {% endif %}
+            <td><h2 style="text-align: center;color: white"> Microphone Status:</h2></td>
+            {% if session['table'] in active_list: %}
+                <td><h2 style="text-align: center;color: white"> Active</h2></td>
+            {% else %}
+                <td><h2 style="text-align: center;color: white"> Inactive</h2></td>
+            {% endif %}
+        </tr>
+    </table>
+    <form action="/" method="POST">
+        <button type="submit" name="action" value="update_main">Update</button>
+    </form>
+    </center>
+    
+
+
+</body>
+
+</html>
