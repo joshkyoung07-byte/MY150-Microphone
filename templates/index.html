@@ -1,20 +1,89 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>MY 150 Questions</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecture Hall Manager</title>
+    <link rel="stylesheet" href="static/styles.css">
 </head>
-<body style="background-color: #1E3765; color: white; font-family: sans-serif;">
-    <form action="/login" method="POST" style="max-width: 420px; margin: 80px auto; text-align: center;">
-        <h1>Class Code</h1>
-        <input type="text" placeholder="Class Code" name="class_code" style="width: 100%; padding: 10px;">
-        <p style="color: #ffb3b3;">{{ code_error }}</p>
+<body>
+    <main class="page auth-page">
+        <section class="brand-panel">
+            <img src="static/images/Mic.jpg" alt="Classroom microphone">
+            <div class="brand-copy">
+                <p class="eyebrow">MY 150</p>
+                <h1>Ready for questions.</h1>
+                <p class="muted">Choose your role and enter your class password.</p>
+            </div>
+        </section>
 
-        <h1>Table Number</h1>
-        <input type="text" placeholder="Table Number" name="table_number" style="width: 100%; padding: 10px;">
+        <section class="panel auth-panel">
+            <p class="eyebrow">Sign In</p>
+            <h2>Choose your role</h2>
 
-        <p style="margin-top: 20px;">Use the instructor code without a table number.</p>
+            <div class="role-switch" aria-label="Choose teacher or student">
+                <button class="role-button" type="button" data-role-button="student">Student</button>
+                <button class="role-button" type="button" data-role-button="instructor">Teacher</button>
+            </div>
 
-        <button type="submit" style="margin-top: 20px; padding: 10px 18px;">Enter</button>
-    </form>
+            <p class="error">{{ code_error }}</p>
+
+            <form class="form-panel" data-role-panel="student" action="login" method="POST">
+                <input type="hidden" name="role" value="student">
+                <div class="form-stack">
+                    <label>
+                        Your name
+                        <input type="text" name="student_name" autocomplete="name" required>
+                    </label>
+
+                    <label>
+                        Table number
+                        <input type="text" name="table_number" autocomplete="off" required>
+                    </label>
+
+                    <label>
+                        Student password
+                        <input type="password" name="password" autocomplete="current-password" required>
+                    </label>
+
+                    <button class="button" type="submit">Open Student Console</button>
+                </div>
+            </form>
+
+            <form class="form-panel" data-role-panel="instructor" action="login" method="POST">
+                <input type="hidden" name="role" value="instructor">
+                <div class="form-stack">
+                    <label>
+                        Teacher password
+                        <input type="password" name="password" autocomplete="current-password" required>
+                    </label>
+
+                    <button class="button" type="submit">Open Teacher Console</button>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <script>
+        const selectedRole = {{ (selected_role or "student")|tojson }};
+        const roleButtons = document.querySelectorAll("[data-role-button]");
+        const rolePanels = document.querySelectorAll("[data-role-panel]");
+
+        function setRole(role) {
+            roleButtons.forEach((button) => {
+                button.classList.toggle("is-active", button.dataset.roleButton === role);
+            });
+
+            rolePanels.forEach((panel) => {
+                panel.classList.toggle("is-active", panel.dataset.rolePanel === role);
+            });
+        }
+
+        roleButtons.forEach((button) => {
+            button.addEventListener("click", () => setRole(button.dataset.roleButton));
+        });
+
+        setRole(selectedRole);
+    </script>
 </body>
 </html>

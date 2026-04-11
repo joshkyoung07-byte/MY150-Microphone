@@ -1,0 +1,409 @@
+:root {
+    --bg: #f5f8f7;
+    --surface: #ffffff;
+    --surface-soft: #e8f3ef;
+    --text: #1f2d2b;
+    --muted: #60706c;
+    --line: #cad8d4;
+    --primary: #0f766e;
+    --primary-dark: #115e59;
+    --accent: #e11d48;
+    --warm: #f5c542;
+    --ok: #15803d;
+    --shadow: 0 16px 36px rgba(31, 45, 43, 0.12);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+button {
+    border: 0;
+    cursor: pointer;
+}
+
+.page {
+    width: min(1040px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 32px 0;
+}
+
+.auth-page {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+    align-items: stretch;
+    gap: 24px;
+    min-height: 100vh;
+}
+
+.brand-panel,
+.panel,
+.queue-item,
+.recent-item,
+.status-strip {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+.brand-panel {
+    overflow: hidden;
+}
+
+.brand-panel img {
+    display: block;
+    width: 100%;
+    height: 260px;
+    object-fit: cover;
+}
+
+.brand-copy {
+    padding: 28px;
+}
+
+.eyebrow {
+    margin: 0 0 10px;
+    color: var(--primary);
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+}
+
+h1,
+h2,
+h3,
+p {
+    margin-top: 0;
+}
+
+h1 {
+    font-size: 2.4rem;
+    line-height: 1.05;
+    margin-bottom: 12px;
+}
+
+h2 {
+    font-size: 1.35rem;
+    margin-bottom: 14px;
+}
+
+h3 {
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.auth-panel {
+    padding: 28px;
+}
+
+.role-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 22px 0;
+}
+
+.role-button,
+.button,
+.logout-button {
+    border-radius: 8px;
+    min-height: 44px;
+    font-weight: 800;
+    transition: transform 140ms ease, background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.role-button {
+    background: var(--surface-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
+}
+
+.role-button.is-active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.button {
+    width: 100%;
+    background: var(--primary);
+    color: white;
+    padding: 12px 18px;
+}
+
+.button:hover,
+.role-button:hover,
+.logout-button:hover {
+    transform: translateY(-1px);
+}
+
+.button.secondary {
+    width: auto;
+    background: var(--surface-soft);
+    color: var(--primary-dark);
+    border: 1px solid var(--line);
+}
+
+.button.danger {
+    background: var(--accent);
+}
+
+.logout-button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    padding: 10px 14px;
+}
+
+.form-stack {
+    display: grid;
+    gap: 14px;
+}
+
+.form-panel {
+    display: none;
+}
+
+.form-panel.is-active {
+    display: block;
+}
+
+label {
+    display: grid;
+    gap: 7px;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+input {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 13px;
+    background: white;
+    color: var(--text);
+}
+
+input:focus {
+    outline: 3px solid rgba(15, 118, 110, 0.18);
+    border-color: var(--primary);
+}
+
+.error {
+    color: var(--accent);
+    min-height: 22px;
+    font-weight: 700;
+}
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.identity {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 2px solid white;
+    box-shadow: 0 8px 18px rgba(31, 45, 43, 0.16);
+}
+
+.dashboard {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+    gap: 18px;
+}
+
+.panel {
+    padding: 22px;
+}
+
+.hero-action {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+}
+
+.status-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    overflow: hidden;
+    box-shadow: none;
+}
+
+.status-cell {
+    background: var(--surface);
+    padding: 16px;
+}
+
+.stat {
+    display: block;
+    font-size: 1.85rem;
+    line-height: 1;
+    font-weight: 900;
+}
+
+.status-pill,
+.tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-weight: 800;
+}
+
+.status-pill {
+    background: var(--surface-soft);
+    color: var(--primary-dark);
+}
+
+.status-pill.active {
+    background: rgba(21, 128, 61, 0.12);
+    color: var(--ok);
+}
+
+.status-pill.waiting {
+    background: rgba(245, 197, 66, 0.22);
+    color: #805b00;
+}
+
+.queue-list,
+.recent-list {
+    display: grid;
+    gap: 10px;
+}
+
+.queue-item,
+.recent-item {
+    box-shadow: none;
+    padding: 14px;
+}
+
+.queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.queue-item .button {
+    width: auto;
+    white-space: nowrap;
+}
+
+.queue-name {
+    font-weight: 900;
+}
+
+.queue-meta {
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.empty {
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    padding: 18px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.active-speaker {
+    border-left: 5px solid var(--primary);
+}
+
+.recent-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    color: var(--muted);
+}
+
+.recent-item .button {
+    width: auto;
+    white-space: nowrap;
+}
+
+.recent-item strong {
+    display: block;
+    color: var(--text);
+}
+
+.message {
+    min-height: 24px;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+@media (max-width: 760px) {
+    .page {
+        width: min(100% - 22px, 1040px);
+        padding: 16px 0;
+    }
+
+    .auth-page,
+    .dashboard,
+    .status-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .brand-panel img {
+        height: 180px;
+    }
+
+    .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .queue-item {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .recent-item {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .button.secondary {
+        width: 100%;
+    }
+
+    .queue-item .button,
+    .recent-item .button {
+        width: 100%;
+    }
+}

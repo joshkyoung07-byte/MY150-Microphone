@@ -3,8 +3,9 @@ import socket
 import subprocess
 from pathlib import Path
 from threading import Lock
+from urllib.parse import urlsplit
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session
 from flask_socketio import SocketIO
 
 
@@ -18,26 +19,70 @@ BASE_DIR = Path(__file__).resolve().parent
 CERT_DIR = BASE_DIR / ".certs"
 CERT_FILE = CERT_DIR / "local-cert.pem"
 KEY_FILE = CERT_DIR / "local-key.pem"
+MAX_RECENT_SPEAKERS = 6
 
 state_lock = Lock()
 q_list = []
+student_profiles = {}
+recent_speakers = []
 student_sids = {}
 sid_roles = {}
 active_table = None
 active_instructor_sid = None
 
 
+def get_student_name(table):
+    return student_profiles.get(table, {}).get("name") or f"Table {table}"
+
+
+def get_student_entry(table):
+    return {
+        "table": table,
+        "name": get_student_name(table),
+    }
+
+
+def remember_recent_speaker_locked(table):
+    if not table:
+        return
+
+    entry = get_student_entry(table)
+    recent_speakers[:] = [
+        speaker for speaker in recent_speakers if speaker.get("table") != table
+    ]
+    recent_speakers.insert(0, entry)
+    del recent_speakers[MAX_RECENT_SPEAKERS:]
+
+
 def get_state():
     with state_lock:
         return {
             "q_list": list(q_list),
+            "queue": [get_student_entry(table) for table in q_list],
             "queue_count": len(q_list),
             "active_table": active_table,
+            "active_student": get_student_entry(active_table) if active_table else None,
+            "recent_speakers": list(recent_speakers),
         }
 
 
 def broadcast_state():
     socketio.emit("state_update", get_state())
+
+
+def redirect_home():
+    referrer = request.headers.get("Referer")
+
+    if referrer:
+        parsed_referrer = urlsplit(referrer)
+        target = parsed_referrer.path or "/"
+
+        if parsed_referrer.query:
+            target += "?" + parsed_referrer.query
+
+        return redirect(target)
+
+    return redirect("/")
 
 
 def get_local_ip_addresses():
@@ -61,7 +106,7 @@ def get_local_ip_addresses():
 
 
 def get_ssl_context():
-    if os.environ.get("MY150_DISABLE_HTTPS") == "1":
+    if os.environ.get("MY150_ENABLE_HTTPS") != "1":
         return None
 
     CERT_DIR.mkdir(exist_ok=True)
@@ -106,6 +151,9 @@ def stop_active_audio(table):
 
         student_sid = student_sids.get(table)
         instructor_sid = active_instructor_sid
+        if table in q_list:
+            q_list.remove(table)
+        remember_recent_speaker_locked(table)
         active_table = None
         active_instructor_sid = None
 
@@ -121,10 +169,15 @@ def home():
     initial_state = get_state()
 
     if role == "student":
+        if not session.get("table") or not session.get("student_name"):
+            session.clear()
+            return render_template("index.html", selected_role="student")
+
         return render_template(
             "main.html",
             class_code=session.get("code"),
             table=session.get("table"),
+            student_name=session.get("student_name"),
             initial_state=initial_state,
         )
 
@@ -136,26 +189,64 @@ def home():
 
 @app.route("/login", methods=["POST"])
 def login():
-    class_code = (request.form.get("class_code") or "").strip()
+    role = (request.form.get("role") or "").strip()
+    class_code = (
+        request.form.get("class_code") or request.form.get("password") or ""
+    ).strip()
     table_number = (request.form.get("table_number") or "").strip()
+    student_name = (request.form.get("student_name") or "").strip()
 
-    if class_code not in {SECRET_CODE, INSTRUCTOR_CODE}:
-        return render_template("index.html", code_error="Incorrect Class Code!")
+    if role == "instructor":
+        if class_code != INSTRUCTOR_CODE:
+            return render_template(
+                "index.html",
+                code_error="Incorrect teacher password.",
+                selected_role="instructor",
+            )
 
-    session.clear()
-
-    if class_code == INSTRUCTOR_CODE:
+        session.clear()
         session["role"] = "instructor"
         session["code"] = class_code
-        return redirect(url_for("home"))
+        return redirect_home()
+
+    if role != "student":
+        return render_template(
+            "index.html",
+            code_error="Choose teacher or student.",
+            selected_role="student",
+        )
+
+    if class_code != SECRET_CODE:
+        return render_template(
+            "index.html",
+            code_error="Incorrect student password.",
+            selected_role="student",
+        )
 
     if not table_number:
-        return render_template("index.html", code_error="Enter a table number.")
+        return render_template(
+            "index.html",
+            code_error="Enter a table number.",
+            selected_role="student",
+        )
 
+    if not student_name:
+        return render_template(
+            "index.html",
+            code_error="Enter your name.",
+            selected_role="student",
+        )
+
+    session.clear()
     session["role"] = "student"
     session["code"] = class_code
     session["table"] = table_number
-    return redirect(url_for("home"))
+    session["student_name"] = student_name
+
+    with state_lock:
+        student_profiles[table_number] = {"name": student_name}
+
+    return redirect_home()
 
 
 @app.route("/student/hand", methods=["POST"])
@@ -165,11 +256,14 @@ def student_hand():
 
     action = (request.get_json(silent=True) or {}).get("action")
     table = session.get("table")
+    student_name = session.get("student_name")
     stop_table = None
 
     with state_lock:
+        student_profiles[table] = {"name": student_name or get_student_name(table)}
+
         if action == "raise":
-            if table not in q_list:
+            if table != active_table and table not in q_list:
                 q_list.append(table)
         elif action == "lower":
             if table in q_list:
@@ -204,7 +298,7 @@ def logout():
 
     session.clear()
     broadcast_state()
-    return redirect(url_for("home"))
+    return redirect_home()
 
 
 @socketio.on("connect")
@@ -215,8 +309,10 @@ def handle_connect():
 
     if role == "student" and table:
         old_sid = None
+        student_name = session.get("student_name")
 
         with state_lock:
+            student_profiles[table] = {"name": student_name or get_student_name(table)}
             old_sid = student_sids.get(table)
             student_sids[table] = request.sid
             sid_roles[request.sid] = ("student", table)
@@ -265,6 +361,9 @@ def handle_disconnect():
             if active_table == table:
                 stop_table = table
                 stop_instructor_sid = active_instructor_sid
+                if table in q_list:
+                    q_list.remove(table)
+                remember_recent_speaker_locked(table)
                 active_table = None
                 active_instructor_sid = None
 
@@ -272,6 +371,9 @@ def handle_disconnect():
             stop_table = active_table
             if active_table:
                 stop_student_sid = student_sids.get(active_table)
+                if active_table in q_list:
+                    q_list.remove(active_table)
+                remember_recent_speaker_locked(active_table)
             active_table = None
             active_instructor_sid = None
 
@@ -299,11 +401,10 @@ def handle_select_student(data):
     previous_instructor_sid = None
     next_student_sid = None
     should_stop_previous = False
+    should_start_next = False
+    can_activate = False
 
     with state_lock:
-        if table not in q_list:
-            return
-
         previous_table = active_table
         previous_student_sid = student_sids.get(previous_table) if previous_table else None
         previous_instructor_sid = active_instructor_sid
@@ -311,12 +412,30 @@ def handle_select_student(data):
         if active_table == table and active_instructor_sid == request.sid:
             active_table = None
             active_instructor_sid = None
+            if table in q_list:
+                q_list.remove(table)
+            remember_recent_speaker_locked(table)
             should_stop_previous = True
         else:
+            can_activate = table in q_list or table in student_sids
+
+            if not can_activate:
+                return
+
             should_stop_previous = previous_table is not None
+            if previous_table:
+                if previous_table in q_list:
+                    q_list.remove(previous_table)
+                remember_recent_speaker_locked(previous_table)
+            if table in q_list:
+                q_list.remove(table)
+            recent_speakers[:] = [
+                speaker for speaker in recent_speakers if speaker.get("table") != table
+            ]
             active_table = table
             active_instructor_sid = request.sid
             next_student_sid = student_sids.get(table)
+            should_start_next = next_student_sid is not None
 
     if should_stop_previous and previous_table:
         if previous_student_sid:
@@ -328,7 +447,7 @@ def handle_select_student(data):
                 room=previous_instructor_sid,
             )
 
-    if active_table == table and next_student_sid:
+    if should_start_next:
         socketio.emit("start_audio", {"table": table}, room=next_student_sid)
 
     broadcast_state()
@@ -441,7 +560,8 @@ if __name__ == "__main__":
     socketio.run(
         app,
         host="0.0.0.0",
-        port=8000,
-        debug=True,
-        ssl_context=get_ssl_context(),
+        port=8002,
+        debug=False,
+        use_reloader=False,
+        allow_unsafe_werkzeug=True
     )

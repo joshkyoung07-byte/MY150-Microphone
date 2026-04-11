@@ -1,39 +1,76 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>MY 150 Questions</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecture Hall Manager</title>
+    <link rel="stylesheet" href="static/styles.css">
 </head>
-<body style="background-color: #1E3765; color: white; font-family: sans-serif;">
-    <div style="max-width: 640px; margin: 40px auto; text-align: center;">
-        <h1>Class Code</h1>
-        <h3>{{ class_code }}</h3>
+<body>
+    <main class="page">
+        <header class="topbar">
+            <div class="identity">
+                <img class="avatar" src="static/images/Mic.jpg" alt="Microphone">
+                <div>
+                    <p class="eyebrow">Student</p>
+                    <h1>{{ student_name }}</h1>
+                    <p class="muted">Table <span id="table-number">{{ table }}</span></p>
+                </div>
+            </div>
 
-        <h1>Table Number</h1>
-        <h3 id="table-number">{{ table }}</h3>
+            <form action="logout" method="POST">
+                <button class="logout-button" type="submit">Log Out</button>
+            </form>
+        </header>
 
-        <h1>People in Queue</h1>
-        <h3 id="queue-count">{{ initial_state.queue_count }}</h3>
+        <section class="dashboard">
+            <div class="hero-action">
+                <div class="status-strip">
+                    <div class="status-cell">
+                        <span class="stat" id="queue-count">{{ initial_state.queue_count }}</span>
+                        <span class="muted">Waiting</span>
+                    </div>
+                    <div class="status-cell">
+                        <span class="status-pill" id="hand-status">Ready</span>
+                        <span class="muted">Hand</span>
+                    </div>
+                    <div class="status-cell">
+                        <span class="status-pill" id="mic-status">Inactive</span>
+                        <span class="muted">Mic</span>
+                    </div>
+                </div>
 
-        <button id="hand-button" type="button" style="padding: 10px 18px; margin-top: 10px;"></button>
+                <section class="panel">
+                    <h2>Ask for the mic</h2>
+                    <p class="muted">Raise your hand when your table is ready to speak.</p>
+                    <button id="hand-button" class="button" type="button"></button>
+                    <p id="student-message" class="message"></p>
+                </section>
+            </div>
 
-        <h2 style="margin-top: 30px;">Microphone Status</h2>
-        <h3 id="mic-status">Inactive</h3>
+            <aside class="panel">
+                <h2>Queue</h2>
+                <div id="queue-list" class="queue-list"></div>
 
-        <h2 style="margin-top: 30px;">Queue</h2>
-        <p id="queue-list">No one in queue</p>
-
-        <p id="student-message" style="min-height: 24px; color: #ffd9a8;"></p>
-
-        <form action="/logout" method="POST" style="margin-top: 20px;">
-            <button type="submit" style="padding: 10px 18px;">Log Out</button>
-        </form>
-    </div>
+                <h2 style="margin-top: 24px;">Recently Spoken</h2>
+                <div id="recent-list" class="recent-list"></div>
+            </aside>
+        </section>
+    </main>
 
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         const table = {{ table|tojson }};
         const initialState = {{ initial_state|tojson }};
+        function buildAppPath(path) {
+            const currentPath = window.location.pathname;
+            const basePath = currentPath === "/" ? "" : currentPath.replace(/\/$/, "");
+
+            return basePath + "/" + path.replace(/^\//, "");
+        }
+
         const socket = io({
+            path: buildAppPath("socket.io"),
             transports: ["websocket"],
             upgrade: false
         });
@@ -63,9 +100,11 @@
         };
 
         const handButton = document.getElementById("hand-button");
+        const handStatus = document.getElementById("hand-status");
         const queueCount = document.getElementById("queue-count");
         const queueList = document.getElementById("queue-list");
         const micStatus = document.getElementById("mic-status");
+        const recentList = document.getElementById("recent-list");
         const studentMessage = document.getElementById("student-message");
 
         let currentState = initialState;
@@ -182,11 +221,11 @@
 
         function getAudioErrorMessage(error) {
             if (!navigator.mediaDevices && !navigator.getUserMedia && !navigator.webkitGetUserMedia && !navigator.mozGetUserMedia) {
-                return "Microphone access requires HTTPS on student devices. Use the https:// address and allow the certificate warning.";
+                return "Microphone access requires HTTPS on student devices. Use the secure class link.";
             }
 
             if (!window.isSecureContext) {
-                return "Microphone access is blocked on this insecure page. Use the https:// address.";
+                return "Microphone access is blocked on this insecure page. Use the secure class link.";
             }
 
             return error && error.message ? error.message : "Unable to access microphone.";
@@ -219,15 +258,81 @@
             });
         }
 
+        function renderQueue(entries) {
+            queueList.innerHTML = "";
+
+            if (!entries.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty";
+                empty.textContent = "No tables waiting.";
+                queueList.appendChild(empty);
+                return;
+            }
+
+            entries.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "queue-item";
+
+                const text = document.createElement("div");
+                const name = document.createElement("div");
+                name.className = "queue-name";
+                name.textContent = entry.name;
+
+                const meta = document.createElement("div");
+                meta.className = "queue-meta";
+                meta.textContent = "Table " + entry.table;
+
+                text.appendChild(name);
+                text.appendChild(meta);
+                row.appendChild(text);
+                queueList.appendChild(row);
+            });
+        }
+
+        function renderRecent(entries) {
+            recentList.innerHTML = "";
+
+            if (!entries.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty";
+                empty.textContent = "No recent speakers yet.";
+                recentList.appendChild(empty);
+                return;
+            }
+
+            entries.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "recent-item";
+
+                const name = document.createElement("strong");
+                name.textContent = entry.name;
+
+                const tableLabel = document.createElement("span");
+                tableLabel.textContent = "Table " + entry.table;
+
+                row.appendChild(name);
+                row.appendChild(tableLabel);
+                recentList.appendChild(row);
+            });
+        }
+
         function renderState(state) {
             currentState = state;
             handRaised = state.q_list.includes(table);
-            queueCount.textContent = state.queue_count;
-            queueList.textContent = state.q_list.length ? state.q_list.join(", ") : "No one in queue";
-            micStatus.textContent = state.active_table === table ? "Active" : "Inactive";
-            handButton.textContent = handRaised ? "Lower Hand" : "Raise Hand";
+            const isActive = state.active_table === table;
 
-            if (state.active_table !== table) {
+            queueCount.textContent = state.queue_count;
+            micStatus.textContent = isActive ? "Live" : "Inactive";
+            micStatus.className = isActive ? "status-pill active" : "status-pill";
+            handStatus.textContent = isActive ? "Speaking" : handRaised ? "Raised" : "Ready";
+            handStatus.className = isActive ? "status-pill active" : handRaised ? "status-pill waiting" : "status-pill";
+            handButton.textContent = isActive ? "Turn Off Microphone" : handRaised ? "Lower Hand" : "Raise Hand";
+            handButton.className = isActive ? "button danger" : "button";
+
+            renderQueue(state.queue || []);
+            renderRecent(state.recent_speakers || []);
+
+            if (!isActive) {
                 studentMessage.textContent = "";
                 closeAudio();
             }
@@ -305,8 +410,9 @@
         }
 
         handButton.addEventListener("click", async () => {
-            const action = handRaised ? "lower" : "raise";
-            const response = await fetch("/student/hand", {
+            const isActive = currentState.active_table === table;
+            const action = handRaised || isActive ? "lower" : "raise";
+            const response = await fetch(buildAppPath("student/hand"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action })
