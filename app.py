@@ -1,3 +1,7 @@
+import os
+import socket
+import subprocess
+from pathlib import Path
 from threading import Lock
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -10,6 +14,10 @@ socketio = SocketIO(app, async_mode="threading")
 
 SECRET_CODE = "12345"
 INSTRUCTOR_CODE = "1234567890"
+BASE_DIR = Path(__file__).resolve().parent
+CERT_DIR = BASE_DIR / ".certs"
+CERT_FILE = CERT_DIR / "local-cert.pem"
+KEY_FILE = CERT_DIR / "local-key.pem"
 
 state_lock = Lock()
 q_list = []
@@ -30,6 +38,60 @@ def get_state():
 
 def broadcast_state():
     socketio.emit("state_update", get_state())
+
+
+def get_local_ip_addresses():
+    addresses = {"127.0.0.1"}
+
+    try:
+        for address in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if "." in address:
+                addresses.add(address)
+    except OSError:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as local_socket:
+            local_socket.connect(("8.8.8.8", 80))
+            addresses.add(local_socket.getsockname()[0])
+    except OSError:
+        pass
+
+    return sorted(addresses)
+
+
+def get_ssl_context():
+    if os.environ.get("MY150_DISABLE_HTTPS") == "1":
+        return None
+
+    CERT_DIR.mkdir(exist_ok=True)
+    subject_alt_names = ["DNS:localhost"]
+    subject_alt_names.extend(f"IP:{address}" for address in get_local_ip_addresses())
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(KEY_FILE),
+            "-out",
+            str(CERT_FILE),
+            "-days",
+            "365",
+            "-subj",
+            "/CN=MY150 Microphone",
+            "-addext",
+            "subjectAltName=" + ",".join(subject_alt_names),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    return str(CERT_FILE), str(KEY_FILE)
 
 
 def stop_active_audio(table):
@@ -376,4 +438,10 @@ def handle_student_audio_error(data):
 
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=8000, debug=True)
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        debug=True,
+        ssl_context=get_ssl_context(),
+    )

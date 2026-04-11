@@ -10,7 +10,7 @@
 
         <h2 style="margin-top: 30px;">Audio Status</h2>
         <p id="audio-status">No microphone selected.</p>
-        <audio id="remote-audio" autoplay playsinline></audio>
+        <audio id="remote-audio" autoplay playsinline preload="none"></audio>
 
         <form action="/logout" method="POST" style="margin-top: 20px;">
             <button type="submit" style="padding: 10px 18px;">Log Out</button>
@@ -20,7 +20,18 @@
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         const initialState = {{ initial_state|tojson }};
-        const socket = io();
+        const socket = io({
+            transports: ["websocket"],
+            upgrade: false
+        });
+
+        const LOW_LATENCY_RTC_CONFIG = {
+            iceServers: [],
+            iceTransportPolicy: "all",
+            bundlePolicy: "max-bundle",
+            rtcpMuxPolicy: "require",
+            iceCandidatePoolSize: 0
+        };
 
         const queueContainer = document.getElementById("queue-container");
         const audioStatus = document.getElementById("audio-status");
@@ -29,6 +40,111 @@
         let currentState = initialState;
         let peerConnection = null;
         let connectedTable = null;
+
+        remoteAudio.preload = "none";
+
+        function shouldUseIceCandidate(candidate) {
+            if (!candidate) {
+                return false;
+            }
+
+            if (candidate.protocol) {
+                return candidate.protocol.toLowerCase() === "udp";
+            }
+
+            return /\sudp\s/i.test(candidate.candidate || "");
+        }
+
+        function setFmtpValue(parameters, key, value) {
+            const parts = parameters
+                .split(";")
+                .map((part) => part.trim())
+                .filter(Boolean);
+            const prefix = key + "=";
+            const nextValue = prefix + value;
+            const existingIndex = parts.findIndex((part) => part.toLowerCase().startsWith(prefix));
+
+            if (existingIndex === -1) {
+                parts.push(nextValue);
+            } else {
+                parts[existingIndex] = nextValue;
+            }
+
+            return parts.join(";");
+        }
+
+        function tuneOpusForLowLatency(description) {
+            if (!description || !description.sdp) {
+                return description;
+            }
+
+            const sections = description.sdp.split(/(?=m=)/);
+            const sdp = sections.map((section) => {
+                if (!section.startsWith("m=audio")) {
+                    return section;
+                }
+
+                const lines = section.split(/\r\n/).filter(Boolean);
+                const opusLineIndex = lines.findIndex((line) => /^a=rtpmap:\d+ opus\/48000/i.test(line));
+
+                if (opusLineIndex === -1) {
+                    return section;
+                }
+
+                const opusPayload = lines[opusLineIndex].match(/^a=rtpmap:(\d+)/)[1];
+                const withoutPacketTiming = lines.filter((line) => !/^a=(max)?ptime:/i.test(line));
+                const opusInsertIndex = withoutPacketTiming.findIndex((line) => /^a=rtpmap:\d+ opus\/48000/i.test(line));
+                const fmtpIndex = withoutPacketTiming.findIndex((line) => line.startsWith("a=fmtp:" + opusPayload));
+                const lowLatencyValues = {
+                    minptime: "10",
+                    useinbandfec: "0",
+                    usedtx: "0",
+                    stereo: "0",
+                    "sprop-stereo": "0"
+                };
+
+                if (fmtpIndex === -1) {
+                    withoutPacketTiming.splice(opusInsertIndex + 1, 0, "a=fmtp:" + opusPayload + " minptime=10;useinbandfec=0;usedtx=0;stereo=0;sprop-stereo=0");
+                } else {
+                    const line = withoutPacketTiming[fmtpIndex];
+                    const separatorIndex = line.indexOf(" ");
+                    const prefix = separatorIndex === -1 ? line : line.slice(0, separatorIndex);
+                    let parameters = separatorIndex === -1 ? "" : line.slice(separatorIndex + 1);
+
+                    Object.entries(lowLatencyValues).forEach(([key, value]) => {
+                        parameters = setFmtpValue(parameters, key, value);
+                    });
+
+                    withoutPacketTiming[fmtpIndex] = prefix + " " + parameters;
+                }
+
+                const timingInsertIndex = withoutPacketTiming.findIndex((line) => line.startsWith("a=fmtp:" + opusPayload));
+                withoutPacketTiming.splice(timingInsertIndex + 1, 0, "a=ptime:10", "a=maxptime:10");
+
+                return withoutPacketTiming.join("\r\n") + "\r\n";
+            }).join("");
+
+            return {
+                type: description.type,
+                sdp
+            };
+        }
+
+        function minimizeReceiverDelay(connection) {
+            if (!connection || !connection.getReceivers) {
+                return;
+            }
+
+            connection.getReceivers().forEach((receiver) => {
+                if ("playoutDelayHint" in receiver) {
+                    try {
+                        receiver.playoutDelayHint = 0;
+                    } catch (error) {
+                        // Browser does not allow overriding the jitter buffer target.
+                    }
+                }
+            });
+        }
 
         function renderState(state) {
             currentState = state;
@@ -91,19 +207,25 @@
             closeInstructorAudio();
             connectedTable = table;
 
-            peerConnection = new RTCPeerConnection({
-                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-            });
+            peerConnection = new RTCPeerConnection(LOW_LATENCY_RTC_CONFIG);
             const connection = peerConnection;
 
             connection.ontrack = (event) => {
+                if (event.receiver && "playoutDelayHint" in event.receiver) {
+                    try {
+                        event.receiver.playoutDelayHint = 0;
+                    } catch (error) {
+                        // Browser does not allow overriding the jitter buffer target.
+                    }
+                }
+
                 remoteAudio.srcObject = event.streams[0];
                 remoteAudio.play().catch(() => {});
                 audioStatus.textContent = "Listening to table " + table + ".";
             };
 
             connection.onicecandidate = (event) => {
-                if (event.candidate) {
+                if (shouldUseIceCandidate(event.candidate)) {
                     socket.emit("instructor_ice_candidate", {
                         table,
                         candidate: event.candidate
@@ -121,7 +243,8 @@
             };
 
             await connection.setRemoteDescription(sdp);
-            const answer = await connection.createAnswer();
+            minimizeReceiverDelay(connection);
+            const answer = tuneOpusForLowLatency(await connection.createAnswer());
             await connection.setLocalDescription(answer);
             socket.emit("webrtc_answer", {
                 table,
@@ -150,10 +273,12 @@
                 return;
             }
 
-            try {
-                await peerConnection.addIceCandidate(data.candidate);
-            } catch (error) {
-                audioStatus.textContent = "Network setup failed.";
+            if (shouldUseIceCandidate(data.candidate)) {
+                try {
+                    await peerConnection.addIceCandidate(data.candidate);
+                } catch (error) {
+                    audioStatus.textContent = "Network setup failed.";
+                }
             }
         });
 
